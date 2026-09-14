@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -30,8 +29,7 @@ Panel {
     var v = settings ? settings.barStyle : undefined
     return v === "Logo" ? v : "Speed"
   }
-  // How the logo reacts while any torrent is transferring (see QuiLogo).
-  readonly property var activityKeys: ["Static", "Pulse", "Dim", "Tint", "Underline", "Corners", "BesideUpDown", "BesideDownUp", "Drift"]
+  // How the logo reacts while any torrent is transferring (see `activities`).
   readonly property string logoActivity: {
     var v = settings ? settings.logoActivity : undefined
     return root.activityKeys.indexOf(v) !== -1 ? v : "Pulse"
@@ -42,7 +40,7 @@ Panel {
     var v = settings ? settings.arrowColor : undefined
     return v === "State" ? v : "Bar"
   }
-  // Colour the mark takes in Tint mode: "accent", "urgent" or a #rrggbb.
+  // Colour the mark takes in Tint mode: a theme token or a hex colour.
   readonly property string tintColor: root.normalizeTint(settings ? settings.tintColor : undefined)
   readonly property bool showLogo: root.barStyle === "Logo"
   readonly property bool settingsShown: root.opened && root.viewMode === "settings"
@@ -81,6 +79,7 @@ Panel {
   readonly property color logoMarkColor: root.hasError ? root.urgentColor : root.barForeground
   // No halo over a transparent bar: a solid disc would sit on the wallpaper.
   readonly property color logoHaloColor: (root.bar && !root.bar.transparent) ? root.bar.background : "transparent"
+  readonly property color barBackground: root.bar ? root.bar.background : Color.background
   readonly property color logoDownColor: root.downColorFor(root.barForeground)
   readonly property color logoUpColor: root.upColorFor(root.barForeground)
   // Vertical space the bar gives the icon, so the underline can be kept
@@ -162,9 +161,42 @@ Panel {
     { key: "custom", label: "Custom" }
   ]
 
-  function isDirectionActivity(a) {
-    return a === "Underline" || a === "Corners" || a === "BesideUpDown" || a === "BesideDownUp" || a === "Drift"
+  // The nine activity treatments, in the order the settings tiles show them:
+  // key (the setting value and the QuiLogo mode), the tile caption, the
+  // sentence under the grid, and whether the treatment draws per-direction
+  // marks (which is what makes the "Arrow colour" group relevant).
+  // manifest.json's logoActivity option list mirrors these keys.
+  readonly property var activities: [
+    { key: "Static", label: "Static", direction: false,
+      description: "Nothing changes. Speeds live in the tooltip only." },
+    { key: "Pulse", label: "Pulse", direction: false,
+      description: "Whole mark fades to 45 % and back every 1.6 s." },
+    { key: "Dim", label: "Dim idle", direction: false,
+      description: "Idle mark at 42 %, full when transferring." },
+    { key: "Tint", label: "Tint", direction: false,
+      description: "Mark changes colour while transferring. Defaults to the theme accent (note: several themes set accent = text, so pick one)." },
+    { key: "Underline", label: "Underline", direction: true,
+      description: "2 px line under the mark: left half = download, right half = upload." },
+    { key: "Corners", label: "Corners", direction: true,
+      description: "↓ bottom-left, ↑ bottom-right, each only while its direction is active." },
+    { key: "BesideUpDown", label: "Beside ↑↓", direction: true,
+      description: "↑ above, ↓ below, in a column next to the mark. Dim when off, lit when on." },
+    { key: "BesideDownUp", label: "Beside ↓↑", direction: true,
+      description: "Same column, download first: ↓ above, ↑ below." },
+    { key: "Drift", label: "Drift", direction: true,
+      description: "One corner arrow slides 3 px in its direction over 2.8 s and fades. In Both, ↓ and ↑ take turns." }
+  ]
+  readonly property var activityKeys: root.activities.map(function(a) { return a.key })
+
+  function activity(key) {
+    for (var i = 0; i < root.activities.length; i++) {
+      if (root.activities[i].key === key) return root.activities[i]
+    }
+    return null
   }
+  function activityLabel(key) { var a = root.activity(key); return a ? a.label : key }
+  function activityDescription(key) { var a = root.activity(key); return a ? a.description : "" }
+  function isDirectionActivity(key) { var a = root.activity(key); return !!a && a.direction }
 
   // Colour validation and resolution both go through the kit's resolver, so
   // the widget accepts exactly what the rest of the shell accepts: the theme
@@ -199,36 +231,6 @@ Panel {
   // the next focus-out does not write the stale one back. A half-typed value
   // is safe: tintColor only changes once something commits.
   onTintColorChanged: if (!root.isTintPreset(root.tintColor)) root.customTint = root.tintColor
-
-  function activityLabel(a) {
-    switch (a) {
-      case "Static": return "Static"
-      case "Pulse": return "Pulse"
-      case "Dim": return "Dim idle"
-      case "Tint": return "Tint"
-      case "Underline": return "Underline"
-      case "Corners": return "Corners"
-      case "BesideUpDown": return "Beside ↑↓"
-      case "BesideDownUp": return "Beside ↓↑"
-      case "Drift": return "Drift"
-    }
-    return a
-  }
-
-  function activityDescription(a) {
-    switch (a) {
-      case "Static": return "Nothing changes. Speeds live in the tooltip only."
-      case "Pulse": return "Whole mark fades to 45 % and back every 1.6 s."
-      case "Dim": return "Idle mark at 42 %, full when transferring."
-      case "Tint": return "Mark changes colour while transferring. Defaults to the theme accent (note: several themes set accent = text, so pick one)."
-      case "Underline": return "2 px line under the mark: left half = download, right half = upload."
-      case "Corners": return "↓ bottom-left, ↑ bottom-right, each only while its direction is active."
-      case "BesideUpDown": return "↑ above, ↓ below, in a column next to the mark. Dim when off, lit when on."
-      case "BesideDownUp": return "Same column, download first: ↓ above, ↑ below."
-      case "Drift": return "One corner arrow slides 3 px in its direction over 2.8 s and fades. In Both, ↓ and ↑ take turns."
-    }
-    return ""
-  }
 
   // Sent over each curl process's stdin via -K - (see the Process blocks
   // below) instead of a -H argument, so the API key never appears in argv.
@@ -779,318 +781,6 @@ Panel {
     text: "↓ 999.9 M/s  ↑ 999.9 M/s"
   }
 
-  // The Qui squirrel, drawn from the upstream logo paths on a 1024-unit grid
-  // and scaled to the bar's icon canvas so it sits with the other bar glyphs.
-  component QuiMark: Item {
-    id: mark
-    property real markSize: Style.bar.iconCanvas
-    property color markColor: root.fg
-    implicitWidth: markSize
-    implicitHeight: markSize
-
-    Shape {
-      width: 1024
-      height: 1024
-      scale: mark.markSize / 1024
-      transformOrigin: Item.TopLeft
-      preferredRendererType: Shape.CurveRenderer
-
-      // Body, with the eye cut out of it.
-      ShapePath {
-        fillColor: mark.markColor
-        strokeColor: mark.markColor
-        strokeWidth: 30
-        joinStyle: ShapePath.RoundJoin
-        fillRule: ShapePath.OddEvenFill
-        PathSvg { path: "M231.392 297.578c62.988-50.202 302.511-28.81 414.4-11.84 6.925-24.705 14.328-38.685 36.111-63.936-46.273-13.75-99.605-16.02-243.904-10.064-68.671-10.656-68.671-139.712 0-151.552 317.312 0 538.72 148 558.256 237.392 19.536 89.392 9.59 62.873 0 100.048-23.006 57.307-85.84 104.192-104.784 110.704-18.944 6.512-101.824 0-101.824 0-32.092 143.875-71.574 205.418-177.008 279.424-59.447 23.136-97.68 20.128-107.744-53.872l21.904-37.888 31.968-14.8c15.87-28.604 14.722-43.365 0-68.08-22.999-5.874-34.752-5.74-53.872 0-34.784 68.765-62.87 93.492-129.647 110.704v24.272l92.943 50.912 75.776 75.776c2.368 76.723-60.976 91.168-92.944 88.8C361.22 876.89 301.6 838.44 168.64 799.002c-26.486-5.732-30.057-15.395-23.088-40.256 58.775-115.1 40.65-183.322 23.088-213.712-29.558 30.414-99.602 83.694-140.896 0-46.2-93.636 61.568-113.862 117.808-110.704 2.368-24.666 22.85-86.55 85.84-136.752z M921.096 305.866a45.584 45.584 0 1 0 -91.168 0a45.584 45.584 0 1 0 91.168 0z" }
-      }
-      // Whiskers.
-      ShapePath {
-        fillColor: "transparent"
-        strokeColor: mark.markColor
-        strokeWidth: 84
-        capStyle: ShapePath.RoundCap
-        PathSvg { path: "M59.736 258.506h81.696M134.328 137.738h131.424" }
-      }
-    }
-  }
-
-  // Settings tile: a miniature of the bar showing exactly what a choice
-  // draws, with a caption underneath. Paints its states like the kit Button.
-  component SettingsTile: Rectangle {
-    id: tile
-    property string caption: ""
-    property bool selected: false
-    default property alias preview: previewSlot.data
-    signal clicked()
-
-    readonly property bool hot: tileMouse.containsMouse
-    implicitHeight: tileColumn.implicitHeight + Style.space(12)
-    radius: Style.cornerRadius
-    color: tileMouse.pressed ? Style.pressedFillFor(root.fg, Color.accent)
-      : hot ? Style.hoverFillFor(root.fg, Color.accent)
-      : selected ? Style.selectedFillFor(root.fg, Color.accent)
-      : "transparent"
-    border.width: 1
-    border.color: selected ? Color.accent : Util.alpha(root.fg, 0.18)
-
-    ColumnLayout {
-      id: tileColumn
-      anchors.fill: parent
-      anchors.margins: Style.space(6)
-      spacing: Style.space(4)
-
-      Rectangle {
-        Layout.fillWidth: true
-        Layout.preferredHeight: Style.space(30)
-        radius: Style.cornerRadius
-        color: root.bar ? root.bar.background : Color.background
-        Item { id: previewSlot; anchors.fill: parent }
-      }
-
-      Text {
-        Layout.fillWidth: true
-        text: tile.caption
-        horizontalAlignment: Text.AlignHCenter
-        color: tile.selected ? root.fg : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
-      }
-    }
-
-    MouseArea {
-      id: tileMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: tile.clicked()
-    }
-  }
-
-  // Colour chip for the tint picker: a swatch square with its name.
-  component SwatchChip: Rectangle {
-    id: chip
-    property string label: ""
-    property color swatch: root.fg
-    property bool selected: false
-    signal clicked()
-
-    readonly property bool hot: chipMouse.containsMouse
-    implicitWidth: chipRow.implicitWidth + Style.space(16)
-    implicitHeight: chipRow.implicitHeight + Style.space(10)
-    radius: Style.cornerRadius
-    color: chipMouse.pressed ? Style.pressedFillFor(root.fg, Color.accent)
-      : hot ? Style.hoverFillFor(root.fg, Color.accent)
-      : selected ? Style.selectedFillFor(root.fg, Color.accent)
-      : "transparent"
-    border.width: 1
-    border.color: selected ? Color.accent : Util.alpha(root.fg, 0.18)
-
-    Row {
-      id: chipRow
-      anchors.centerIn: parent
-      spacing: Style.space(6)
-      Rectangle {
-        width: Style.space(12); height: Style.space(12); radius: 2
-        anchors.verticalCenter: parent.verticalCenter
-        color: chip.swatch
-      }
-      Text {
-        anchors.verticalCenter: parent.verticalCenter
-        text: chip.label
-        color: chip.selected ? root.fg : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-    }
-
-    MouseArea {
-      id: chipMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: chip.clicked()
-    }
-  }
-
-  // Small arrow on a 6-unit grid. `halo` paints a disc in the bar colour
-  // behind it so it stays readable where it overlaps the mark's tail.
-  component QuiArrow: Item {
-    id: arrow
-    property bool up: false
-    property color color: root.fg
-    property bool halo: false
-    property color haloColor: "transparent"
-    property real unit: 1
-    implicitWidth: 6 * unit
-    implicitHeight: 6 * unit
-
-    Shape {
-      width: 6
-      height: 6
-      scale: arrow.unit
-      transformOrigin: Item.TopLeft
-      preferredRendererType: Shape.CurveRenderer
-
-      ShapePath {
-        fillColor: arrow.halo ? arrow.haloColor : "transparent"
-        strokeColor: "transparent"
-        strokeWidth: 0
-        PathSvg { path: "M7 3a4 4 0 1 0 -8 0a4 4 0 1 0 8 0z" }
-      }
-      ShapePath {
-        fillColor: "transparent"
-        strokeColor: arrow.color
-        strokeWidth: 1.4
-        capStyle: ShapePath.RoundCap
-        joinStyle: ShapePath.RoundJoin
-        PathSvg { path: arrow.up ? "M3 5.3V.7M1 2.6 3 .7l2 1.9" : "M3 .7v4.6M1 3.4 3 5.3l2-1.9" }
-      }
-    }
-  }
-
-  // The bar logo with its activity treatment. Geometry is laid out on the
-  // 16-unit icon canvas and scaled by `size`, so the settings tiles and the
-  // bar draw the exact same thing.
-  component QuiLogo: Item {
-    id: logo
-    property string activity: "Static"
-    property string arrowColor: "Bar"
-    property color tint: root.fg
-    property bool downActive: false
-    property bool upActive: false
-    property color color: root.fg
-    property color haloColor: "transparent"
-    property real size: Style.bar.iconCanvas
-    // Vertical room the logo is centred in (0 = unconstrained). Only the
-    // underline reaches past the mark, and it is clamped to stay inside.
-    property real availableHeight: 0
-
-    readonly property real u: size / 16
-    readonly property bool active: downActive || upActive
-    readonly property bool beside: activity === "BesideUpDown" || activity === "BesideDownUp"
-    // State colours pick their light-surface variant from the mark colour:
-    // a dark mark means a light background behind it.
-    readonly property color downMark: arrowColor === "State" ? root.downColorFor(color) : color
-    readonly property color upMark: arrowColor === "State" ? root.upColorFor(color) : color
-    readonly property color offMark: Util.alpha(color, 0.3)
-
-    implicitWidth: size + (beside ? 9 * u : 0)
-    implicitHeight: size
-
-    property real pulsePhase: 1.0
-    SequentialAnimation on pulsePhase {
-      running: logo.activity === "Pulse" && logo.active
-      loops: Animation.Infinite
-      NumberAnimation { from: 1.0; to: 0.45; duration: 800; easing.type: Easing.InOutSine }
-      NumberAnimation { from: 0.45; to: 1.0; duration: 800; easing.type: Easing.InOutSine }
-      onRunningChanged: if (!running) logo.pulsePhase = 1.0
-    }
-
-    // Drift runs one arrow at a time. The sweep is a fixed 2.8 s cycle and
-    // `driftCycle` alternates which direction owns it, so a direction that
-    // starts or stops mid-sweep takes effect at once — a duration bound to
-    // downActive/upActive would only apply on the next loop.
-    property real driftT: 0
-    property int driftCycle: 0
-    SequentialAnimation {
-      running: logo.activity === "Drift" && logo.active
-      loops: Animation.Infinite
-      NumberAnimation { target: logo; property: "driftT"; from: 0; to: 1; duration: 2800 }
-      ScriptAction { script: logo.driftCycle = (logo.driftCycle + 1) % 2 }
-      onRunningChanged: if (!running) { logo.driftT = 0; logo.driftCycle = 0 }
-    }
-    function driftPhase(isUp) {
-      if (isUp ? !logo.upActive : !logo.downActive) return -1
-      if (logo.downActive && logo.upActive)
-        return logo.driftCycle === (isUp ? 1 : 0) ? logo.driftT : -1
-      return logo.driftT
-    }
-    function driftOpacity(p) {
-      if (p < 0) return 0
-      return p < 0.3 ? p / 0.3 * 0.85 : (1 - p) / 0.7 * 0.85
-    }
-    function driftOffset(p, isUp) {
-      if (p < 0) return 0
-      var d = (p * 2 - 1) * 1.5 * logo.u
-      return isUp ? -d : d
-    }
-    readonly property real driftDown: driftPhase(false)
-    readonly property real driftUp: driftPhase(true)
-
-    QuiMark {
-      markSize: logo.size
-      markColor: logo.activity === "Tint" && logo.active ? logo.tint : logo.color
-      opacity: logo.activity === "Pulse" ? logo.pulsePhase
-        : logo.activity === "Dim" ? (logo.active ? 1.0 : 0.42)
-        : 1.0
-    }
-
-    // Underline halves. They sit 2 units below the 16-unit mark, which needs
-    // 24 units of bar to show; on a shorter bar they slide up against the
-    // mark instead of being clipped away.
-    readonly property real underlineY: logo.availableHeight > 0
-      ? Math.min(18 * logo.u, (logo.availableHeight + logo.size) / 2 - 2 * logo.u)
-      : 18 * logo.u
-    Rectangle {
-      visible: logo.activity === "Underline"
-      x: 1 * logo.u; y: logo.underlineY; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
-      color: logo.downMark
-      opacity: logo.downActive ? 1 : 0
-    }
-    Rectangle {
-      visible: logo.activity === "Underline"
-      x: 9 * logo.u; y: logo.underlineY; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
-      color: logo.upMark
-      opacity: logo.upActive ? 1 : 0
-    }
-
-    // Corner arrows.
-    QuiArrow {
-      visible: logo.activity === "Corners"
-      x: -2 * logo.u; y: 12 * logo.u; unit: logo.u
-      color: logo.downMark; halo: true; haloColor: logo.haloColor
-      opacity: logo.downActive ? 1 : 0
-    }
-    QuiArrow {
-      visible: logo.activity === "Corners"
-      up: true
-      x: 12 * logo.u; y: 12 * logo.u; unit: logo.u
-      color: logo.upMark; halo: true; haloColor: logo.haloColor
-      opacity: logo.upActive ? 1 : 0
-    }
-
-    // Arrow column beside the mark, always present, lit per direction.
-    QuiArrow {
-      visible: logo.beside
-      up: logo.activity === "BesideUpDown"
-      x: 19 * logo.u; y: 1 * logo.u; unit: logo.u
-      color: up ? (logo.upActive ? logo.upMark : logo.offMark) : (logo.downActive ? logo.downMark : logo.offMark)
-    }
-    QuiArrow {
-      visible: logo.beside
-      up: logo.activity === "BesideDownUp"
-      x: 19 * logo.u; y: 9 * logo.u; unit: logo.u
-      color: up ? (logo.upActive ? logo.upMark : logo.offMark) : (logo.downActive ? logo.downMark : logo.offMark)
-    }
-
-    // Quiet drift.
-    QuiArrow {
-      visible: logo.activity === "Drift"
-      x: 13 * logo.u; y: 13 * logo.u + logo.driftOffset(logo.driftDown, false); unit: logo.u
-      color: logo.downMark; halo: true; haloColor: logo.haloColor
-      opacity: logo.driftOpacity(logo.driftDown)
-    }
-    QuiArrow {
-      visible: logo.activity === "Drift"
-      up: true
-      x: 13 * logo.u; y: 13 * logo.u + logo.driftOffset(logo.driftUp, true); unit: logo.u
-      color: logo.upMark; halo: true; haloColor: logo.haloColor
-      opacity: logo.driftOpacity(logo.driftUp)
-    }
-  }
-
   BarIconButton {
     id: logoButton
     anchors.fill: parent
@@ -1113,6 +803,8 @@ Panel {
           upActive: root.showLogo && root.uploading
           color: root.logoMarkColor
           haloColor: root.logoHaloColor
+          downStateColor: root.logoDownColor
+          upStateColor: root.logoUpColor
           availableHeight: root.logoBarHeight
         }
       }
@@ -1368,6 +1060,9 @@ Panel {
                     Layout.preferredWidth: 1
                     caption: "Speed"
                     selected: root.barStyle === "Speed"
+                    foreground: root.fg
+                    fontFamily: root.fontFamily
+                    previewBackground: root.barBackground
                     onClicked: root.persistSettings({ barStyle: "Speed" })
                     Text {
                       anchors.centerIn: parent
@@ -1382,6 +1077,9 @@ Panel {
                     Layout.preferredWidth: 1
                     caption: "Logo"
                     selected: root.barStyle === "Logo"
+                    foreground: root.fg
+                    fontFamily: root.fontFamily
+                    previewBackground: root.barBackground
                     onClicked: root.persistSettings({ barStyle: "Logo" })
                     QuiLogo {
                       anchors.centerIn: parent
@@ -1419,6 +1117,9 @@ Panel {
                       Layout.preferredWidth: 1
                       caption: modelData.key
                       selected: root.barMetric === modelData.key
+                      foreground: root.fg
+                      fontFamily: root.fontFamily
+                      previewBackground: root.barBackground
                       onClicked: root.persistSettings({ barMetric: modelData.key })
                       Text {
                         anchors.centerIn: parent
@@ -1458,6 +1159,9 @@ Panel {
                       Layout.preferredWidth: 1
                       caption: root.activityLabel(modelData)
                       selected: root.logoActivity === modelData
+                      foreground: root.fg
+                      fontFamily: root.fontFamily
+                      previewBackground: root.barBackground
                       onClicked: root.persistSettings({ logoActivity: modelData })
                       QuiLogo {
                         anchors.centerIn: parent
@@ -1471,6 +1175,8 @@ Panel {
                         upActive: root.logoTilesLive && activityTile.modelData !== "Dim"
                         color: root.barForeground
                         haloColor: root.logoHaloColor
+                        downStateColor: root.logoDownColor
+                        upStateColor: root.logoUpColor
                       }
                     }
                   }
@@ -1514,6 +1220,9 @@ Panel {
                       Layout.preferredWidth: 1
                       caption: modelData.label
                       selected: root.arrowColor === modelData.key
+                      foreground: root.fg
+                      fontFamily: root.fontFamily
+                      previewBackground: root.barBackground
                       onClicked: root.persistSettings({ arrowColor: modelData.key })
                       Row {
                         anchors.centerIn: parent
@@ -1551,6 +1260,8 @@ Panel {
                     delegate: SwatchChip {
                       required property var modelData
                       label: modelData.label
+                      foreground: root.fg
+                      fontFamily: root.fontFamily
                       swatch: modelData.key === "custom"
                         ? (root.isHexColor(root.customTint) ? root.customTint : root.dim)
                         : root.resolveTint(modelData.key)
