@@ -19,7 +19,9 @@
     "defaults": {
       "baseUrl": "http://localhost:7476",
       "refreshIntervalSec": 10,
-      "barMetric": "Download"
+      "barMetric": "Download",
+      "barStyle": "Speed",
+      "logoActivity": "Pulse"
     },
     "schema": [
       {
@@ -45,6 +47,22 @@
         "description": "Which speed(s) the bar chip shows",
         "options": ["Download", "Upload", "Both"],
         "defaultValue": "Download"
+      },
+      {
+        "key": "barStyle",
+        "type": "enum",
+        "label": "Bar style",
+        "description": "Show the speed chip or the Qui logo on the bar",
+        "options": ["Speed", "Logo"],
+        "defaultValue": "Speed"
+      },
+      {
+        "key": "logoActivity",
+        "type": "enum",
+        "label": "Logo activity",
+        "description": "Pulse the logo while any torrent is transferring, or keep it static",
+        "options": ["Pulse", "Static"],
+        "defaultValue": "Pulse"
       }
     ]
   }

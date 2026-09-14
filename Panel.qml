@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -25,11 +26,36 @@ Panel {
     var v = settings ? settings.barMetric : undefined
     return (v === "Upload" || v === "Both") ? v : "Download"
   }
+  readonly property string barStyle: {
+    var v = settings ? settings.barStyle : undefined
+    return v === "Logo" ? v : "Speed"
+  }
+  readonly property string logoActivity: {
+    var v = settings ? settings.logoActivity : undefined
+    return v === "Static" ? v : "Pulse"
+  }
+  readonly property bool showLogo: root.barStyle === "Logo"
 
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(fg, 1.45)
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : "JetBrainsMono Nerd Font"
   readonly property string barIcon: "󰇚"
+  readonly property color urgentColor: root.bar ? root.bar.urgent : Color.urgent
+
+  // Any byte moving across any instance counts as activity for the logo.
+  readonly property bool transferring: (Number(root.stats.totalDownloadSpeed) || 0) > 0
+    || (Number(root.stats.totalUploadSpeed) || 0) > 0
+  readonly property bool logoPulsing: root.showLogo && root.logoActivity === "Pulse"
+    && !root.hasError && root.transferring
+
+  property real pulsePhase: 1.0
+  SequentialAnimation on pulsePhase {
+    running: root.logoPulsing
+    loops: Animation.Infinite
+    NumberAnimation { from: 1.0; to: 0.45; duration: 800; easing.type: Easing.InOutSine }
+    NumberAnimation { from: 0.45; to: 1.0; duration: 800; easing.type: Easing.InOutSine }
+    onRunningChanged: if (!running) root.pulsePhase = 1.0
+  }
 
   property string apiKey: ""
   property string envBaseUrl: ""
@@ -81,6 +107,8 @@ Panel {
   property string draftBaseUrl: ""
   property int draftRefreshIntervalSec: 10
   property string draftBarMetric: "Download"
+  property string draftBarStyle: "Speed"
+  property string draftLogoActivity: "Pulse"
   property string settingsStatusText: ""
 
   // Sent over each curl process's stdin via -K - (see the Process blocks
@@ -268,6 +296,8 @@ Panel {
     root.draftBaseUrl = root.baseUrl
     root.draftRefreshIntervalSec = root.pollInterval
     root.draftBarMetric = root.barMetric
+    root.draftBarStyle = root.barStyle
+    root.draftLogoActivity = root.logoActivity
     root.settingsStatusText = ""
   }
 
@@ -284,7 +314,9 @@ Panel {
     if (!url) url = root.envBaseUrl || "http://localhost:7476"
     var interval = Math.max(5, Math.min(300, Math.round(Number(root.draftRefreshIntervalSec) || 10)))
     var metric = (root.draftBarMetric === "Upload" || root.draftBarMetric === "Both") ? root.draftBarMetric : "Download"
-    var next = { baseUrl: url, refreshIntervalSec: interval, barMetric: metric }
+    var style = root.draftBarStyle === "Logo" ? "Logo" : "Speed"
+    var activity = root.draftLogoActivity === "Static" ? "Static" : "Pulse"
+    var next = { baseUrl: url, refreshIntervalSec: interval, barMetric: metric, barStyle: style, logoActivity: activity }
 
     root.draftBaseUrl = url
     root.settings = next
@@ -594,9 +626,64 @@ Panel {
     text: "↓ 999.9 M/s  ↑ 999.9 M/s"
   }
 
+  // The Qui squirrel, drawn from the upstream logo paths on a 1024-unit grid
+  // and scaled to the bar's icon canvas so it sits with the other bar glyphs.
+  component QuiMark: Item {
+    id: mark
+    property real markSize: Style.bar.iconCanvas
+    property color markColor: root.fg
+    implicitWidth: markSize
+    implicitHeight: markSize
+
+    Shape {
+      width: 1024
+      height: 1024
+      scale: mark.markSize / 1024
+      transformOrigin: Item.TopLeft
+      preferredRendererType: Shape.CurveRenderer
+
+      // Body, with the eye cut out of it.
+      ShapePath {
+        fillColor: mark.markColor
+        strokeColor: mark.markColor
+        strokeWidth: 30
+        joinStyle: ShapePath.RoundJoin
+        fillRule: ShapePath.OddEvenFill
+        PathSvg { path: "M231.392 297.578c62.988-50.202 302.511-28.81 414.4-11.84 6.925-24.705 14.328-38.685 36.111-63.936-46.273-13.75-99.605-16.02-243.904-10.064-68.671-10.656-68.671-139.712 0-151.552 317.312 0 538.72 148 558.256 237.392 19.536 89.392 9.59 62.873 0 100.048-23.006 57.307-85.84 104.192-104.784 110.704-18.944 6.512-101.824 0-101.824 0-32.092 143.875-71.574 205.418-177.008 279.424-59.447 23.136-97.68 20.128-107.744-53.872l21.904-37.888 31.968-14.8c15.87-28.604 14.722-43.365 0-68.08-22.999-5.874-34.752-5.74-53.872 0-34.784 68.765-62.87 93.492-129.647 110.704v24.272l92.943 50.912 75.776 75.776c2.368 76.723-60.976 91.168-92.944 88.8C361.22 876.89 301.6 838.44 168.64 799.002c-26.486-5.732-30.057-15.395-23.088-40.256 58.775-115.1 40.65-183.322 23.088-213.712-29.558 30.414-99.602 83.694-140.896 0-46.2-93.636 61.568-113.862 117.808-110.704 2.368-24.666 22.85-86.55 85.84-136.752z M921.096 305.866a45.584 45.584 0 1 0 -91.168 0a45.584 45.584 0 1 0 91.168 0z" }
+      }
+      // Whiskers.
+      ShapePath {
+        fillColor: "transparent"
+        strokeColor: mark.markColor
+        strokeWidth: 84
+        capStyle: ShapePath.RoundCap
+        PathSvg { path: "M59.736 258.506h81.696M134.328 137.738h131.424" }
+      }
+    }
+  }
+
+  BarIconButton {
+    id: logoButton
+    anchors.fill: parent
+    visible: root.showLogo
+    bar: root.bar
+    tooltipText: button.tooltipText
+    iconComponent: Component {
+      Item {
+        QuiMark {
+          anchors.centerIn: parent
+          markColor: root.hasError ? root.urgentColor : root.fg
+          opacity: root.logoPulsing ? root.pulsePhase : 1.0
+        }
+      }
+    }
+    onPressed: function(b) { root.triggerPress(b) }
+  }
+
   WidgetButton {
     id: button
     anchors.fill: parent
+    visible: !root.showLogo
     bar: root.bar
     text: root.hasError
       ? root.barIcon + " !"
@@ -612,12 +699,12 @@ Panel {
     onPressed: function(b) { root.triggerPress(b) }
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
+  implicitWidth: root.showLogo ? logoButton.implicitWidth : button.implicitWidth
+  implicitHeight: root.showLogo ? logoButton.implicitHeight : button.implicitHeight
 
   KeyboardPanel {
     id: panel
-    anchorItem: button
+    anchorItem: root.showLogo ? logoButton : button
     owner: root
     bar: root.bar
     open: root.opened
@@ -738,6 +825,65 @@ Panel {
           }
 
           Text {
+            text: "Bar style"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Flow {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Repeater {
+              model: ["Speed", "Logo"]
+              delegate: Button {
+                required property string modelData
+                text: modelData
+                foreground: root.fg
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                horizontalPadding: Style.spacing.controlPaddingX
+                verticalPadding: Style.spacing.controlPaddingY
+                selected: root.draftBarStyle === modelData
+                onClicked: root.draftBarStyle = modelData
+              }
+            }
+          }
+
+          Text {
+            visible: root.draftBarStyle === "Logo"
+            text: "Logo activity"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Flow {
+            visible: root.draftBarStyle === "Logo"
+            Layout.fillWidth: true
+            spacing: 6
+
+            Repeater {
+              model: ["Pulse", "Static"]
+              delegate: Button {
+                required property string modelData
+                text: modelData === "Pulse" ? "Pulse while transferring" : "Static"
+                foreground: root.fg
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.caption
+                horizontalPadding: Style.spacing.controlPaddingX
+                verticalPadding: Style.spacing.controlPaddingY
+                selected: root.draftLogoActivity === modelData
+                onClicked: root.draftLogoActivity = modelData
+              }
+            }
+          }
+
+          Text {
+            visible: root.draftBarStyle !== "Logo"
             text: "Bar metric"
             color: root.dim
             font.family: root.fontFamily
@@ -745,6 +891,7 @@ Panel {
           }
 
           Flow {
+            visible: root.draftBarStyle !== "Logo"
             Layout.fillWidth: true
             spacing: 6
 

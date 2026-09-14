@@ -8,9 +8,14 @@ An [Omarchy](https://omarchy.org/) bar widget for [Qui](https://github.com/autob
 
 ![On the desktop](images/desktop.png)
 
+Or as the Qui logo (`barStyle` = `Logo`), pulsing while torrents transfer:
+
+![Logo mode](images/bar-logo.png)
+
 ## Features
 
 - **Bar chip** — aggregate download and/or upload speed across every qBittorrent instance Qui manages (configurable via the `barMetric` setting), with a tooltip summary
+- **Logo mode** — or show the Qui logo instead of a speed, as a plain bar icon or pulsing while any torrent is transferring (`barStyle` / `logoActivity` settings); speeds stay in the tooltip
 - **Status filters** — click "active / downloading / seeding / paused / errored" to filter the list ("active" means torrents currently transferring data, i.e. non-zero download or upload speed)
 - **Ratio at a glance** — each torrent row shows its share ratio (e.g. `0.82`) right next to its size
 - **Instance filter** — switch between "All" and individual qBittorrent instances
@@ -57,6 +62,8 @@ Available settings (`shell.json`, or `omarchy bar set marcuspelo.omarqui <key> <
 | `baseUrl` | string | `http://localhost:7476` | Base URL of your Qui instance (no trailing slash). Falls back to `BASE_URL` in `~/.config/omarqui/.env` when unset. |
 | `refreshIntervalSec` | integer | `10` | Seconds between background refreshes (5–300) |
 | `barMetric` | enum | `Download` | What the bar chip shows: `Download`, `Upload`, or `Both`. Also editable from the in-panel Settings screen. |
+| `barStyle` | enum | `Speed` | `Speed` shows the chip above; `Logo` shows the Qui logo as a bar icon instead. Also editable from the in-panel Settings screen. |
+| `logoActivity` | enum | `Pulse` | With `barStyle` = `Logo`: `Pulse` fades the logo in and out while any torrent is transferring, `Static` keeps it fixed. |
 
 ## Keyboard shortcuts
 
