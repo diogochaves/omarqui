@@ -8,14 +8,14 @@ An [Omarchy](https://omarchy.org/) bar widget for [Qui](https://github.com/autob
 
 ![On the desktop](images/desktop.png)
 
-Or as the Qui logo (`barStyle` = `Logo`), pulsing while torrents transfer:
+Or as the Qui logo (`barStyle` = `Logo`), with a choice of how it shows transfer activity:
 
 ![Logo mode](images/bar-logo.png)
 
 ## Features
 
 - **Bar chip** — aggregate download and/or upload speed across every qBittorrent instance Qui manages (configurable via the `barMetric` setting), with a tooltip summary
-- **Logo mode** — or show the Qui logo instead of a speed, as a plain bar icon or pulsing while any torrent is transferring (`barStyle` / `logoActivity` settings); speeds stay in the tooltip
+- **Logo mode** — or show the Qui logo instead of a speed (`barStyle` = `Logo`); speeds stay in the tooltip. Pick how it reacts while torrents transfer (`logoActivity`): static, pulse, dim when idle, tint in a colour of your choice, or a per-direction mark (underline halves, corner arrows, an arrow column beside the logo, or a quietly drifting arrow) in the bar colour or in download-blue / upload-green. The in-panel Settings screen previews every option as the real icon
 - **Status filters** — click "active / downloading / seeding / paused / errored" to filter the list ("active" means torrents currently transferring data, i.e. non-zero download or upload speed)
 - **Ratio at a glance** — each torrent row shows its share ratio (e.g. `0.82`) right next to its size
 - **Instance filter** — switch between "All" and individual qBittorrent instances
@@ -55,7 +55,7 @@ The Qui API key never appears in process arguments: every `curl` call sends it a
 
 ## Configuration
 
-Available settings (`shell.json`, or `omarchy bar set marcuspelo.omarqui <key> <value>`):
+Available settings (`shell.json`, `omarchy bar set marcuspelo.omarqui <key> <value>`, or the in-panel Settings screen — ⚙ or `s` — where every change applies as you make it):
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
@@ -63,13 +63,17 @@ Available settings (`shell.json`, or `omarchy bar set marcuspelo.omarqui <key> <
 | `refreshIntervalSec` | integer | `10` | Seconds between background refreshes (5–300) |
 | `barMetric` | enum | `Download` | What the bar chip shows: `Download`, `Upload`, or `Both`. Also editable from the in-panel Settings screen. |
 | `barStyle` | enum | `Speed` | `Speed` shows the chip above; `Logo` shows the Qui logo as a bar icon instead. Also editable from the in-panel Settings screen. |
-| `logoActivity` | enum | `Pulse` | With `barStyle` = `Logo`: `Pulse` fades the logo in and out while any torrent is transferring, `Static` keeps it fixed. |
+| `logoActivity` | enum | `Pulse` | With `barStyle` = `Logo`, how the logo shows activity: `Static`, `Pulse` (fade in and out), `Dim` (idle at 42 %, full while transferring), `Tint` (recolour while transferring), `Underline` (left half = download, right half = upload), `Corners` (↓ bottom-left, ↑ bottom-right), `BesideUpDown` / `BesideDownUp` (arrow column next to the logo), `Drift` (one small arrow sliding in its direction). Also editable from the in-panel Settings screen. |
+| `arrowColor` | enum | `Bar` | For the direction modes above: `Bar` paints the marks in the bar text colour, `State` in the widget's download blue / upload green. |
+| `tintColor` | string | `accent` | For `Tint`: `accent` (theme accent), `urgent` (theme urgent), or a `#rrggbb` value. |
 
 ## Keyboard shortcuts
 
 | Key | Action |
 |---|---|
 | `r` | Refresh |
+| `a` | Add torrent |
+| `s` | Settings |
 | `esc` | Close the panel |
 
 ## Remove

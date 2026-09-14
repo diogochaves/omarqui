@@ -21,7 +21,9 @@
       "refreshIntervalSec": 10,
       "barMetric": "Download",
       "barStyle": "Speed",
-      "logoActivity": "Pulse"
+      "logoActivity": "Pulse",
+      "arrowColor": "Bar",
+      "tintColor": "accent"
     },
     "schema": [
       {
@@ -60,9 +62,24 @@
         "key": "logoActivity",
         "type": "enum",
         "label": "Logo activity",
-        "description": "Pulse the logo while any torrent is transferring, or keep it static",
-        "options": ["Pulse", "Static"],
+        "description": "With barStyle = Logo: how the logo shows transfer activity (Static, Pulse, Dim, Tint, Underline, Corners, BesideUpDown, BesideDownUp, Drift)",
+        "options": ["Static", "Pulse", "Dim", "Tint", "Underline", "Corners", "BesideUpDown", "BesideDownUp", "Drift"],
         "defaultValue": "Pulse"
+      },
+      {
+        "key": "arrowColor",
+        "type": "enum",
+        "label": "Arrow colour",
+        "description": "Direction marks (Underline, Corners, Beside, Drift) in the bar colour or in the widget's download blue / upload green",
+        "options": ["Bar", "State"],
+        "defaultValue": "Bar"
+      },
+      {
+        "key": "tintColor",
+        "type": "string",
+        "label": "Tint colour",
+        "description": "Colour the logo takes while transferring in Tint mode: accent, urgent, or a #rrggbb value",
+        "defaultValue": "accent"
       }
     ]
   }
