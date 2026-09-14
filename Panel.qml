@@ -46,6 +46,11 @@ Panel {
   readonly property string tintColor: root.normalizeTint(settings ? settings.tintColor : undefined)
   readonly property bool showLogo: root.barStyle === "Logo"
   readonly property bool settingsShown: root.opened && root.viewMode === "settings"
+  // The activity tiles only animate while they are actually on screen.
+  readonly property bool logoTilesLive: root.settingsShown && root.settingsTab === "bar" && root.showLogo
+  // One cap for the popup card. The settings Flickable derives its own from
+  // it (see settingsFlick) so the card and its scroller cannot disagree.
+  readonly property real panelMaxHeight: Style.space(root.viewMode === "settings" ? 720 : 620)
   // The arrow column in the Beside layouts sits past the icon canvas.
   readonly property real logoExtraWidth: (root.logoActivity === "BesideUpDown" || root.logoActivity === "BesideDownUp")
     ? 9 * Style.bar.iconCanvas / 16 : 0
@@ -69,10 +74,24 @@ Panel {
   function downColorFor(fg) { return root.onLightSurface(fg) ? root.downColorOnLight : root.downColor }
   function upColorFor(fg) { return root.onLightSurface(fg) ? root.upColorOnLight : root.upColor }
 
+  // Everything the logo is painted with, in one place: the bar instance and
+  // the settings previews read the same values, so a tile shows exactly what
+  // the bar draws. `barForeground` (not `fg`) is what the bar icon uses — it
+  // flips to the auto-picked legible colour when the bar goes transparent.
+  readonly property color logoMarkColor: root.hasError ? root.urgentColor : root.barForeground
+  // No halo over a transparent bar: a solid disc would sit on the wallpaper.
+  readonly property color logoHaloColor: (root.bar && !root.bar.transparent) ? root.bar.background : "transparent"
+  readonly property color logoDownColor: root.downColorFor(root.barForeground)
+  readonly property color logoUpColor: root.upColorFor(root.barForeground)
+  // Vertical space the bar gives the icon, so the underline can be kept
+  // inside a short bar. 0 on a vertical bar, where height is unconstrained.
+  readonly property real logoBarHeight: (root.bar && !root.bar.vertical) ? root.bar.barSize : 0
+
   // Per-direction activity across every instance drives the logo marks.
-  readonly property bool downloading: (Number(root.stats.totalDownloadSpeed) || 0) > 0
-  readonly property bool uploading: (Number(root.stats.totalUploadSpeed) || 0) > 0
-  readonly property bool transferring: root.downloading || root.uploading
+  // An errored widget shows the plain mark, so the error state is folded in
+  // here rather than repeated at every consumer.
+  readonly property bool downloading: !root.hasError && (Number(root.stats.totalDownloadSpeed) || 0) > 0
+  readonly property bool uploading: !root.hasError && (Number(root.stats.totalUploadSpeed) || 0) > 0
 
   property string apiKey: ""
   property string envBaseUrl: ""
@@ -131,6 +150,9 @@ Panel {
   // selected so switching back does not lose what was typed.
   property string customTint: "#c678dd"
   property bool tintCustomSelected: false
+  // The hex field lives inside the lazily loaded Bar tab, so its focus state
+  // is mirrored here for the panel's key catcher.
+  property bool tintFieldFocused: false
 
   readonly property var tintPresets: [
     { key: "accent", label: "Theme accent" },
@@ -144,20 +166,23 @@ Panel {
     return a === "Underline" || a === "Corners" || a === "BesideUpDown" || a === "BesideDownUp" || a === "Drift"
   }
 
+  // Colour validation and resolution both go through the kit's resolver, so
+  // the widget accepts exactly what the rest of the shell accepts: the theme
+  // tokens below, or a hex colour (#rgb, #rrggbb, #rrggbbaa).
+  readonly property var tintTokens: ["accent", "urgent", "foreground", "text", "background", "transparent"]
+
   function isHexColor(v) {
-    return /^#[0-9a-fA-F]{6}$/.test(String(v || "").trim())
+    return Style.colorFromHex(v, null) !== null
   }
 
   function normalizeTint(v) {
-    v = String(v || "").trim()
-    if (v === "accent" || v === "urgent") return v
-    return root.isHexColor(v) ? v.toLowerCase() : "accent"
+    v = String(v || "").trim().toLowerCase()
+    if (root.tintTokens.indexOf(v) !== -1) return v
+    return root.isHexColor(v) ? v : "accent"
   }
 
   function resolveTint(v) {
-    if (v === "urgent") return root.urgentColor
-    if (v === "accent") return Color.accent
-    return v
+    return Style.resolveStateColor(v, root.fg, Color.accent, root.urgentColor, Color.accent)
   }
 
   function isTintPreset(v) {
@@ -168,6 +193,12 @@ Panel {
   }
 
   readonly property string tintChoice: (root.tintCustomSelected || !root.isTintPreset(root.tintColor)) ? "custom" : root.tintColor
+
+  // Keep the working value in step with a tint set from outside the panel
+  // (omarchy bar set, another screen's instance), so the field shows it and
+  // the next focus-out does not write the stale one back. A half-typed value
+  // is safe: tintColor only changes once something commits.
+  onTintColorChanged: if (!root.isTintPreset(root.tintColor)) root.customTint = root.tintColor
 
   function activityLabel(a) {
     switch (a) {
@@ -243,8 +274,8 @@ Panel {
     var s = String(state || "")
     if (s.indexOf("error") !== -1 || s === "missingFiles" || s === "unknown") return Color.urgent
     if (s.indexOf("paused") === 0 || s.indexOf("stopped") === 0) return root.dim
-    if (s === "downloading" || s.indexOf("DL") !== -1 || s === "allocating" || s === "metaDL") return root.downColor
-    if (s === "uploading" || s.indexOf("UP") !== -1) return root.upColor
+    if (s === "downloading" || s.indexOf("DL") !== -1 || s === "allocating" || s === "metaDL") return root.downColorFor(root.fg)
+    if (s === "uploading" || s.indexOf("UP") !== -1) return root.upColorFor(root.fg)
     return root.dim
   }
 
@@ -379,12 +410,13 @@ Panel {
     root.viewMode = "list"
   }
 
+  // The two text fields bind to `root.baseUrl` / `root.customTint` rather than
+  // being seeded here, so a change made elsewhere (omarchy bar set, another
+  // screen's instance) shows up instead of being reverted on the next commit.
   function openSettingsView() {
     root.viewMode = "settings"
-    baseUrlField.text = root.baseUrl
     if (!root.isTintPreset(root.tintColor)) root.customTint = root.tintColor
     root.tintCustomSelected = !root.isTintPreset(root.tintColor)
-    hexField.text = root.customTint
     root.settingsStatusText = ""
     root.hexStatusText = ""
   }
@@ -412,11 +444,13 @@ Panel {
     }
   }
 
-  function commitBaseUrl() {
-    var url = String(baseUrlField.text || "").trim()
+  // Only writes when the effective URL actually changes, so opening and
+  // leaving the field does not bake the .env / default fallback into
+  // shell.json (which would then survive a later .env edit).
+  function commitBaseUrl(text) {
+    var url = String(text || "").trim()
     if (!url) url = root.envBaseUrl || "http://localhost:7476"
-    baseUrlField.text = url
-    if (url === root.baseUrl && root.settings && root.settings.baseUrl === url) return
+    if (url === root.baseUrl) return
     root.persistSettings({ baseUrl: url })
     root.hasError = false
     root.errorText = ""
@@ -440,11 +474,13 @@ Panel {
     root.persistSettings({ tintColor: key })
   }
 
+  // Reads the working value rather than the field, so the Bar tab can live
+  // behind a Loader (the field's id is not visible from out here).
   function commitCustomTint() {
-    var v = String(hexField.text || "").trim().toLowerCase()
+    var v = String(root.customTint || "").trim().toLowerCase()
     root.customTint = v
     if (!root.isHexColor(v)) {
-      root.hexStatusText = "Enter a colour as #rrggbb"
+      root.hexStatusText = "Enter a hex colour: #rgb, #rrggbb or #rrggbbaa"
       return
     }
     root.hexStatusText = ""
@@ -927,6 +963,9 @@ Panel {
     property color color: root.fg
     property color haloColor: "transparent"
     property real size: Style.bar.iconCanvas
+    // Vertical room the logo is centred in (0 = unconstrained). Only the
+    // underline reaches past the mark, and it is clamped to stay inside.
+    property real availableHeight: 0
 
     readonly property real u: size / 16
     readonly property bool active: downActive || upActive
@@ -949,24 +988,24 @@ Panel {
       onRunningChanged: if (!running) logo.pulsePhase = 1.0
     }
 
-    // Drift runs one arrow at a time: t sweeps 0→1 per cycle, and with both
-    // directions active each arrow takes half of a doubled cycle.
+    // Drift runs one arrow at a time. The sweep is a fixed 2.8 s cycle and
+    // `driftCycle` alternates which direction owns it, so a direction that
+    // starts or stops mid-sweep takes effect at once — a duration bound to
+    // downActive/upActive would only apply on the next loop.
     property real driftT: 0
-    NumberAnimation on driftT {
+    property int driftCycle: 0
+    SequentialAnimation {
       running: logo.activity === "Drift" && logo.active
       loops: Animation.Infinite
-      from: 0
-      to: 1
-      duration: (logo.downActive && logo.upActive) ? 5600 : 2800
-      onRunningChanged: if (!running) logo.driftT = 0
+      NumberAnimation { target: logo; property: "driftT"; from: 0; to: 1; duration: 2800 }
+      ScriptAction { script: logo.driftCycle = (logo.driftCycle + 1) % 2 }
+      onRunningChanged: if (!running) { logo.driftT = 0; logo.driftCycle = 0 }
     }
     function driftPhase(isUp) {
-      var t = logo.driftT
-      if (logo.downActive && logo.upActive) {
-        if (isUp) return t >= 0.5 ? (t - 0.5) * 2 : -1
-        return t < 0.5 ? t * 2 : -1
-      }
-      return (isUp ? logo.upActive : logo.downActive) ? t : -1
+      if (isUp ? !logo.upActive : !logo.downActive) return -1
+      if (logo.downActive && logo.upActive)
+        return logo.driftCycle === (isUp ? 1 : 0) ? logo.driftT : -1
+      return logo.driftT
     }
     function driftOpacity(p) {
       if (p < 0) return 0
@@ -988,16 +1027,21 @@ Panel {
         : 1.0
     }
 
-    // Underline halves.
+    // Underline halves. They sit 2 units below the 16-unit mark, which needs
+    // 24 units of bar to show; on a shorter bar they slide up against the
+    // mark instead of being clipped away.
+    readonly property real underlineY: logo.availableHeight > 0
+      ? Math.min(18 * logo.u, (logo.availableHeight + logo.size) / 2 - 2 * logo.u)
+      : 18 * logo.u
     Rectangle {
       visible: logo.activity === "Underline"
-      x: 1 * logo.u; y: 18 * logo.u; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
+      x: 1 * logo.u; y: logo.underlineY; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
       color: logo.downMark
       opacity: logo.downActive ? 1 : 0
     }
     Rectangle {
       visible: logo.activity === "Underline"
-      x: 9 * logo.u; y: 18 * logo.u; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
+      x: 9 * logo.u; y: logo.underlineY; width: 6 * logo.u; height: 2 * logo.u; radius: logo.u
       color: logo.upMark
       opacity: logo.upActive ? 1 : 0
     }
@@ -1052,7 +1096,9 @@ Panel {
     anchors.fill: parent
     visible: root.showLogo
     bar: root.bar
-    slotSize: Style.bar.iconSlot + root.logoExtraWidth
+    // The arrow column widens the slot, and BarIconButton maps slotSize to
+    // height on a vertical bar, where the extra width buys nothing.
+    slotSize: Style.bar.iconSlot + (root.bar && root.bar.vertical ? 0 : root.logoExtraWidth)
     tooltipText: button.tooltipText
     iconComponent: Component {
       Item {
@@ -1061,13 +1107,13 @@ Panel {
           activity: root.hasError ? "Static" : root.logoActivity
           arrowColor: root.arrowColor
           tint: root.resolveTint(root.tintColor)
-          downActive: !root.hasError && root.downloading
-          upActive: !root.hasError && root.uploading
-          // logoButton.foreground follows bar.barForeground, which flips to the
-          // auto-picked legible colour when the bar goes transparent.
-          color: root.hasError ? root.urgentColor : logoButton.foreground
-          // No halo over a transparent bar: a solid disc would sit on the wallpaper.
-          haloColor: root.bar && !root.bar.transparent ? root.bar.background : "transparent"
+          // Gated on showLogo as well: this button is still instantiated in
+          // Speed style, and an ungated Pulse would animate behind it.
+          downActive: root.showLogo && root.downloading
+          upActive: root.showLogo && root.uploading
+          color: root.logoMarkColor
+          haloColor: root.logoHaloColor
+          availableHeight: root.logoBarHeight
         }
       }
     }
@@ -1104,12 +1150,12 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(460))
-    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, Style.space(root.viewMode === "settings" ? 720 : 620))
+    contentHeight: panel.fittedContentHeight(contentColumn.implicitHeight, root.panelMaxHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: searchField.activeFocus || sourceField.activeFocus || baseUrlField.activeFocus || hexField.activeFocus
+      blocked: searchField.activeFocus || sourceField.activeFocus || baseUrlField.activeFocus || root.tintFieldFocused
       onCloseRequested: root.close()
       onTextKey: function(t) {
         if (t === "r" || t === "R") { root.refresh(); root.fetchTorrents() }
@@ -1126,6 +1172,7 @@ Panel {
         spacing: Style.space(10)
 
         RowLayout {
+          id: headerRow
           Layout.fillWidth: true
           spacing: 8
 
@@ -1191,6 +1238,7 @@ Panel {
         // Settings: one tab per group so new options land in a group
         // instead of stretching one long list. Everything applies on change.
         ButtonGroup {
+          id: settingsTabs
           visible: root.viewMode === "settings"
           options: [
             { value: "connection", label: "Connection" },
@@ -1209,7 +1257,16 @@ Panel {
           id: settingsFlick
           visible: root.viewMode === "settings"
           Layout.fillWidth: true
-          Layout.preferredHeight: Math.min(settingsColumn.implicitHeight, Style.space(620))
+          // Takes whatever the card has left after the header, the tabs and
+          // the footer hint, so the two caps cannot drift apart and overflow
+          // the card at a large font scale.
+          readonly property real chrome: headerRow.implicitHeight + settingsTabs.implicitHeight
+            + footerHint.implicitHeight + contentColumn.spacing * 3
+          readonly property real cap: Math.max(Style.space(120),
+            Math.min(root.panelMaxHeight,
+              panel.availableCardHeight > 0 ? panel.availableCardHeight : root.panelMaxHeight)
+            - panel.verticalContentInset - chrome)
+          Layout.preferredHeight: Math.min(settingsColumn.implicitHeight, cap)
           contentWidth: width
           contentHeight: settingsColumn.implicitHeight
           clip: true
@@ -1222,283 +1279,319 @@ Panel {
             spacing: Style.space(10)
 
             // ---- Connection ----
-            Text {
-              visible: root.settingsTab === "connection"
-              text: "Qui base URL"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            TextField {
-              id: baseUrlField
+            ColumnLayout {
               visible: root.settingsTab === "connection"
               Layout.fillWidth: true
-              placeholderText: "http://localhost:7476"
-              foreground: root.fg
-              onEditingFinished: root.commitBaseUrl()
-            }
+              spacing: Style.space(10)
 
-            NumberField {
-              visible: root.settingsTab === "connection"
-              label: "Refresh interval (seconds)"
-              value: root.pollInterval
-              from: 5
-              to: 300
-              stepSize: 5
-              foreground: root.fg
-              accent: Color.accent
-              fontFamily: root.fontFamily
-              onModified: function(v) { root.setRefreshInterval(v) }
-            }
-
-            Text {
-              visible: root.settingsTab === "connection"
-              Layout.fillWidth: true
-              text: "The API key stays in ~/.config/omarqui/.env and is not editable here."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            Text {
-              visible: root.settingsTab === "connection"
-              Layout.fillWidth: true
-              text: "Tip: disabling and re-enabling the plugin resets this field. Add BASE_URL=... to ~/.config/omarqui/.env to keep a fallback that survives that."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            // ---- Bar ----
-            Text {
-              visible: root.settingsTab === "bar"
-              text: "Show on the bar"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            GridLayout {
-              visible: root.settingsTab === "bar"
-              Layout.fillWidth: true
-              columns: 2
-              columnSpacing: Style.space(6)
-              rowSpacing: Style.space(6)
-
-              SettingsTile {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                caption: "Speed"
-                selected: root.barStyle === "Speed"
-                onClicked: root.persistSettings({ barStyle: "Speed" })
-                Text {
-                  anchors.centerIn: parent
-                  text: "↓ 2.4 M/s"
-                  color: root.fg
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                }
+              Text {
+                text: "Qui base URL"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
               }
-              SettingsTile {
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
-                caption: "Logo"
-                selected: root.barStyle === "Logo"
-                onClicked: root.persistSettings({ barStyle: "Logo" })
-                QuiLogo { anchors.centerIn: parent }
-              }
-            }
 
-            // Speed: which number the chip shows.
-            Text {
-              visible: root.settingsTab === "bar" && !root.showLogo
-              text: "Metric"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            GridLayout {
-              visible: root.settingsTab === "bar" && !root.showLogo
-              Layout.fillWidth: true
-              columns: 3
-              columnSpacing: Style.space(6)
-              rowSpacing: Style.space(6)
-
-              Repeater {
-                model: [
-                  { key: "Download", sample: "↓ 2.4 M/s" },
-                  { key: "Upload", sample: "↑ 310 K/s" },
-                  { key: "Both", sample: "↓ 2.4 M ↑ 310 K" }
-                ]
-                delegate: SettingsTile {
-                  required property var modelData
-                  Layout.fillWidth: true
-                  Layout.preferredWidth: 1
-                  caption: modelData.key
-                  selected: root.barMetric === modelData.key
-                  onClicked: root.persistSettings({ barMetric: modelData.key })
-                  Text {
-                    anchors.centerIn: parent
-                    text: modelData.sample
-                    color: root.fg
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-              }
-            }
-
-            // Logo: every tile is the real mark with both directions active,
-            // so each treatment shows what it actually does on the bar.
-            Text {
-              visible: root.settingsTab === "bar" && root.showLogo
-              text: "While transferring"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            GridLayout {
-              visible: root.settingsTab === "bar" && root.showLogo
-              Layout.fillWidth: true
-              columns: 3
-              columnSpacing: Style.space(6)
-              rowSpacing: Style.space(6)
-
-              Repeater {
-                model: root.activityKeys
-                delegate: SettingsTile {
-                  id: activityTile
-                  required property string modelData
-                  Layout.fillWidth: true
-                  Layout.preferredWidth: 1
-                  caption: root.activityLabel(modelData)
-                  selected: root.logoActivity === modelData
-                  onClicked: root.persistSettings({ logoActivity: modelData })
-                  QuiLogo {
-                    anchors.centerIn: parent
-                    activity: activityTile.modelData
-                    arrowColor: root.arrowColor
-                    tint: root.resolveTint(root.tintColor)
-                    // Dim is the one treatment whose point is the idle look.
-                    // Gated on the view being shown so the Pulse and Drift
-                    // tiles do not animate behind a closed panel.
-                    downActive: root.settingsShown && activityTile.modelData !== "Dim"
-                    upActive: root.settingsShown && activityTile.modelData !== "Dim"
-                    haloColor: root.bar ? root.bar.background : Color.background
-                  }
-                }
-              }
-            }
-
-            Text {
-              visible: root.settingsTab === "bar" && root.showLogo
-              Layout.fillWidth: true
-              text: root.activityDescription(root.logoActivity)
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            // Direction treatments: arrows in the bar colour or the state colours.
-            Text {
-              visible: root.settingsTab === "bar" && root.showLogo && root.isDirectionActivity(root.logoActivity)
-              text: "Arrow colour"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            GridLayout {
-              visible: root.settingsTab === "bar" && root.showLogo && root.isDirectionActivity(root.logoActivity)
-              Layout.fillWidth: true
-              columns: 2
-              columnSpacing: Style.space(6)
-              rowSpacing: Style.space(6)
-
-              Repeater {
-                model: [
-                  { key: "Bar", label: "Bar colour" },
-                  { key: "State", label: "Down blue · Up green" }
-                ]
-                delegate: SettingsTile {
-                  id: arrowTile
-                  required property var modelData
-                  Layout.fillWidth: true
-                  Layout.preferredWidth: 1
-                  caption: modelData.label
-                  selected: root.arrowColor === modelData.key
-                  onClicked: root.persistSettings({ arrowColor: modelData.key })
-                  Row {
-                    anchors.centerIn: parent
-                    spacing: Style.space(6)
-                    QuiArrow {
-                      unit: Style.bar.iconCanvas / 16 * 1.4
-                      color: arrowTile.modelData.key === "State" ? root.downColorFor(root.fg) : root.fg
-                    }
-                    QuiArrow {
-                      up: true
-                      unit: Style.bar.iconCanvas / 16 * 1.4
-                      color: arrowTile.modelData.key === "State" ? root.upColorFor(root.fg) : root.fg
-                    }
-                  }
-                }
-              }
-            }
-
-            // Tint: the colour the mark takes while transferring.
-            Text {
-              visible: root.settingsTab === "bar" && root.showLogo && root.logoActivity === "Tint"
-              text: "Active colour"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-
-            Flow {
-              visible: root.settingsTab === "bar" && root.showLogo && root.logoActivity === "Tint"
-              Layout.fillWidth: true
-              spacing: Style.space(6)
-
-              Repeater {
-                model: root.tintPresets
-                delegate: SwatchChip {
-                  required property var modelData
-                  label: modelData.label
-                  swatch: modelData.key === "custom"
-                    ? (root.isHexColor(root.customTint) ? root.customTint : root.dim)
-                    : root.resolveTint(modelData.key)
-                  selected: root.tintChoice === modelData.key
-                  onClicked: root.selectTint(modelData.key)
-                }
-              }
-            }
-
-            RowLayout {
-              visible: root.settingsTab === "bar" && root.showLogo && root.logoActivity === "Tint" && root.tintChoice === "custom"
-              Layout.fillWidth: true
-              spacing: Style.space(8)
-
+              // Bound rather than seeded on open, so a change made elsewhere
+              // shows up here. Typing breaks the binding (which is what keeps
+              // an edit in progress safe); committing restores it.
               TextField {
-                id: hexField
-                Layout.preferredWidth: Style.space(120)
-                placeholderText: "#rrggbb"
+                id: baseUrlField
+                Layout.fillWidth: true
+                placeholderText: "http://localhost:7476"
                 foreground: root.fg
-                onEditingFinished: root.commitCustomTint()
+                text: root.baseUrl
+                onEditingFinished: {
+                  root.commitBaseUrl(text)
+                  text = Qt.binding(function() { return root.baseUrl })
+                }
+              }
+
+              NumberField {
+                label: "Refresh interval (seconds)"
+                value: root.pollInterval
+                from: 5
+                to: 300
+                stepSize: 5
+                foreground: root.fg
+                accent: Color.accent
+                fontFamily: root.fontFamily
+                onModified: function(v) { root.setRefreshInterval(v) }
               }
 
               Text {
                 Layout.fillWidth: true
-                text: root.hexStatusText
+                text: "The API key stays in ~/.config/omarqui/.env and is not editable here."
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.WordWrap
+              }
+
+              Text {
+                Layout.fillWidth: true
+                text: "Tip: disabling and re-enabling the plugin resets this field. Add BASE_URL=... to ~/.config/omarqui/.env to keep a fallback that survives that."
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            // ---- Bar ----
+            // Nine live logo previews are not cheap, and the whole settings
+            // tree is built per screen at shell start, so the tab is only
+            // instantiated once it is actually looked at.
+            Loader {
+              id: barTab
+              active: root.settingsTab === "bar"
+              visible: active
+              Layout.fillWidth: true
+
+              sourceComponent: ColumnLayout {
+                spacing: Style.space(10)
+
+                Text {
+                  text: "Show on the bar"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                GridLayout {
+                  Layout.fillWidth: true
+                  columns: 2
+                  columnSpacing: Style.space(6)
+                  rowSpacing: Style.space(6)
+
+                  SettingsTile {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1
+                    caption: "Speed"
+                    selected: root.barStyle === "Speed"
+                    onClicked: root.persistSettings({ barStyle: "Speed" })
+                    Text {
+                      anchors.centerIn: parent
+                      text: "↓ 2.4 M/s"
+                      color: root.fg
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+                  SettingsTile {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1
+                    caption: "Logo"
+                    selected: root.barStyle === "Logo"
+                    onClicked: root.persistSettings({ barStyle: "Logo" })
+                    QuiLogo {
+                      anchors.centerIn: parent
+                      color: root.barForeground
+                      haloColor: root.logoHaloColor
+                    }
+                  }
+                }
+
+                // Speed: which number the chip shows.
+                Text {
+                  visible: !root.showLogo
+                  text: "Metric"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                GridLayout {
+                  visible: !root.showLogo
+                  Layout.fillWidth: true
+                  columns: 3
+                  columnSpacing: Style.space(6)
+                  rowSpacing: Style.space(6)
+
+                  Repeater {
+                    model: [
+                      { key: "Download", sample: "↓ 2.4 M/s" },
+                      { key: "Upload", sample: "↑ 310 K/s" },
+                      { key: "Both", sample: "↓ 2.4 M ↑ 310 K" }
+                    ]
+                    delegate: SettingsTile {
+                      required property var modelData
+                      Layout.fillWidth: true
+                      Layout.preferredWidth: 1
+                      caption: modelData.key
+                      selected: root.barMetric === modelData.key
+                      onClicked: root.persistSettings({ barMetric: modelData.key })
+                      Text {
+                        anchors.centerIn: parent
+                        text: modelData.sample
+                        color: root.fg
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+                  }
+                }
+
+                // Logo: every tile is the real mark with both directions
+                // active, painted from the same colours the bar uses, so each
+                // treatment shows what it actually does up there.
+                Text {
+                  visible: root.showLogo
+                  text: "While transferring"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                GridLayout {
+                  visible: root.showLogo
+                  Layout.fillWidth: true
+                  columns: 3
+                  columnSpacing: Style.space(6)
+                  rowSpacing: Style.space(6)
+
+                  Repeater {
+                    model: root.activityKeys
+                    delegate: SettingsTile {
+                      id: activityTile
+                      required property string modelData
+                      Layout.fillWidth: true
+                      Layout.preferredWidth: 1
+                      caption: root.activityLabel(modelData)
+                      selected: root.logoActivity === modelData
+                      onClicked: root.persistSettings({ logoActivity: modelData })
+                      QuiLogo {
+                        anchors.centerIn: parent
+                        activity: activityTile.modelData
+                        arrowColor: root.arrowColor
+                        tint: root.resolveTint(root.tintColor)
+                        // Dim is the one treatment whose point is the idle
+                        // look. Gated on this tab being on screen so Pulse
+                        // and Drift never animate out of sight.
+                        downActive: root.logoTilesLive && activityTile.modelData !== "Dim"
+                        upActive: root.logoTilesLive && activityTile.modelData !== "Dim"
+                        color: root.barForeground
+                        haloColor: root.logoHaloColor
+                      }
+                    }
+                  }
+                }
+
+                Text {
+                  visible: root.showLogo
+                  Layout.fillWidth: true
+                  text: root.activityDescription(root.logoActivity)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                // Direction treatments: arrows in the bar colour or the state colours.
+                Text {
+                  visible: root.showLogo && root.isDirectionActivity(root.logoActivity)
+                  text: "Arrow colour"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                GridLayout {
+                  visible: root.showLogo && root.isDirectionActivity(root.logoActivity)
+                  Layout.fillWidth: true
+                  columns: 2
+                  columnSpacing: Style.space(6)
+                  rowSpacing: Style.space(6)
+
+                  Repeater {
+                    model: [
+                      { key: "Bar", label: "Bar colour" },
+                      { key: "State", label: "Down blue · Up green" }
+                    ]
+                    delegate: SettingsTile {
+                      id: arrowTile
+                      required property var modelData
+                      Layout.fillWidth: true
+                      Layout.preferredWidth: 1
+                      caption: modelData.label
+                      selected: root.arrowColor === modelData.key
+                      onClicked: root.persistSettings({ arrowColor: modelData.key })
+                      Row {
+                        anchors.centerIn: parent
+                        spacing: Style.space(6)
+                        QuiArrow {
+                          unit: Style.bar.iconCanvas / 16 * 1.4
+                          color: arrowTile.modelData.key === "State" ? root.logoDownColor : root.barForeground
+                        }
+                        QuiArrow {
+                          up: true
+                          unit: Style.bar.iconCanvas / 16 * 1.4
+                          color: arrowTile.modelData.key === "State" ? root.logoUpColor : root.barForeground
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // Tint: the colour the mark takes while transferring.
+                Text {
+                  visible: root.showLogo && root.logoActivity === "Tint"
+                  text: "Active colour"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Flow {
+                  visible: root.showLogo && root.logoActivity === "Tint"
+                  Layout.fillWidth: true
+                  spacing: Style.space(6)
+
+                  Repeater {
+                    model: root.tintPresets
+                    delegate: SwatchChip {
+                      required property var modelData
+                      label: modelData.label
+                      swatch: modelData.key === "custom"
+                        ? (root.isHexColor(root.customTint) ? root.customTint : root.dim)
+                        : root.resolveTint(modelData.key)
+                      selected: root.tintChoice === modelData.key
+                      onClicked: root.selectTint(modelData.key)
+                    }
+                  }
+                }
+
+                RowLayout {
+                  visible: root.showLogo && root.logoActivity === "Tint" && root.tintChoice === "custom"
+                  Layout.fillWidth: true
+                  spacing: Style.space(8)
+
+                  // Bound to the working value, which is also what
+                  // commitCustomTint() reads: this field is inside a Loader,
+                  // so its id is not reachable from the panel's functions.
+                  TextField {
+                    id: hexField
+                    Layout.preferredWidth: Style.space(120)
+                    placeholderText: "#rrggbb"
+                    foreground: root.fg
+                    text: root.customTint
+                    onTextEdited: {
+                      root.customTint = text
+                      text = Qt.binding(function() { return root.customTint })
+                    }
+                    onEditingFinished: root.commitCustomTint()
+                    onActiveFocusChanged: root.tintFieldFocused = activeFocus
+                    Component.onDestruction: root.tintFieldFocused = false
+                  }
+
+                  Text {
+                    Layout.fillWidth: true
+                    text: root.hexStatusText
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                  }
+                }
               }
             }
 
@@ -1885,6 +1978,7 @@ Panel {
         }
 
         Text {
+          id: footerHint
           Layout.fillWidth: true
           Layout.topMargin: 4
           text: "r refresh · a add · s settings · esc close"

@@ -78,7 +78,7 @@
         "key": "tintColor",
         "type": "string",
         "label": "Tint colour",
-        "description": "Colour the logo takes while transferring in Tint mode: accent, urgent, or a #rrggbb value",
+        "description": "Colour the logo takes while transferring in Tint mode: a theme token (accent, urgent, foreground, background, transparent) or a hex colour (#rgb, #rrggbb or #rrggbbaa)",
         "defaultValue": "accent"
       }
     ]

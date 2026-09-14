@@ -65,7 +65,7 @@ Available settings (`shell.json`, `omarchy bar set marcuspelo.omarqui <key> <val
 | `barStyle` | enum | `Speed` | `Speed` shows the chip above; `Logo` shows the Qui logo as a bar icon instead. Also editable from the in-panel Settings screen. |
 | `logoActivity` | enum | `Pulse` | With `barStyle` = `Logo`, how the logo shows activity: `Static`, `Pulse` (fade in and out), `Dim` (idle at 42 %, full while transferring), `Tint` (recolour while transferring), `Underline` (left half = download, right half = upload), `Corners` (↓ bottom-left, ↑ bottom-right), `BesideUpDown` / `BesideDownUp` (arrow column next to the logo), `Drift` (one small arrow sliding in its direction). Also editable from the in-panel Settings screen. |
 | `arrowColor` | enum | `Bar` | For the direction modes above: `Bar` paints the marks in the bar text colour, `State` in the widget's download blue / upload green. |
-| `tintColor` | string | `accent` | For `Tint`: `accent` (theme accent), `urgent` (theme urgent), or a `#rrggbb` value. |
+| `tintColor` | string | `accent` | For `Tint`: a theme token (`accent`, `urgent`, `foreground`, `background`, `transparent`) or a hex colour (`#rgb`, `#rrggbb` or `#rrggbbaa`). |
 
 ## Keyboard shortcuts
 
