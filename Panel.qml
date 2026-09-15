@@ -35,12 +35,16 @@ Panel {
   property string envBaseUrl: ""
   property bool apiKeyLoaded: false
   property var stats: ({})
+  // Library-wide per-status counts from Qui (the same numbers its sidebar
+  // shows), keyed by the status names its `filters` parameter accepts.
+  property var statusCounts: ({})
+  property int activeCount: 0
   property var instances: []
   property bool loading: false
   property bool hasError: false
   property string errorText: ""
 
-  property var rawTorrents: []
+  property var torrents: []
   property bool torrentsLoading: false
   property string searchQuery: ""
   property int selectedInstanceId: -1
@@ -48,25 +52,7 @@ Panel {
   property string actionInProgress: ""
   property string confirmDeleteHash: ""
 
-  property var torrents: {
-    var list = root.rawTorrents
-    if (root.selectedInstanceId !== -1)
-      list = list.filter(function(t) { return t.instance_id === root.selectedInstanceId })
-    if (root.statusFilter)
-      list = list.filter(function(t) { return root.matchesStatusFilter(t, root.statusFilter) })
-    return list
-  }
-
-  // Not provided by Qui's cross-instance stats endpoint, so derived client-side
-  // from the same rawTorrents list the other StatChip counts are sourced from.
-  property int activeCount: {
-    var list = root.rawTorrents
-    var n = 0
-    for (var i = 0; i < list.length; i++) {
-      if ((Number(list[i].dlspeed) || 0) > 0 || (Number(list[i].upspeed) || 0) > 0) n++
-    }
-    return n
-  }
+  readonly property bool filtered: root.statusFilter !== "" || root.selectedInstanceId !== -1 || root.searchQuery !== ""
 
   property string viewMode: "list"
   property var categories: []
@@ -137,18 +123,20 @@ Panel {
     return s.indexOf("paused") === 0 || s.indexOf("stopped") === 0
   }
 
-  function matchesStatusFilter(torrent, filter) {
-    var s = String(torrent.state || "")
-    if (filter === "downloading") return s === "downloading" || s.indexOf("DL") !== -1 || s === "allocating" || s === "metaDL"
-    if (filter === "seeding") return s === "uploading" || s.indexOf("UP") !== -1
-    if (filter === "paused") return s.indexOf("paused") === 0 || s.indexOf("stopped") === 0
-    if (filter === "error") return s.indexOf("error") !== -1 || s === "missingFiles" || s === "unknown"
-    if (filter === "active") return (Number(torrent.dlspeed) || 0) > 0 || (Number(torrent.upspeed) || 0) > 0
-    return true
+  // Qui has no status for "transferring right now", but its filters accept
+  // an expression over the torrent fields.
+  readonly property string activeExpr: "DlSpeed > 0 || UpSpeed > 0"
+
+  // The chips are keyed by Qui's own status names, except "active".
+  function statusFilterParam(filter) {
+    if (!filter) return ""
+    var filters = filter === "active" ? { expr: root.activeExpr } : { status: [filter] }
+    return "&filters=" + encodeURIComponent(JSON.stringify(filters))
   }
 
   function toggleStatusFilter(key) {
     root.statusFilter = root.statusFilter === key ? "" : key
+    root.fetchTorrents()
   }
 
   function parseEnv(raw) {
@@ -193,11 +181,31 @@ Panel {
     try {
       var data = JSON.parse(String(raw || ""))
       stats = data.stats || {}
+      statusCounts = (data.counts && data.counts.status) || {}
       hasError = false
       errorText = ""
     } catch (e) {
       hasError = true
       errorText = "Failed to read Qui response"
+    }
+  }
+
+  // The "active" chip count, kept in step with the list. Only the total is
+  // wanted; the one torrent in the page is ignored.
+  function fetchActiveCount() {
+    if (activeProc.running) return
+    activeProc.command = ["curl", "-fsS", "--max-time", "6", "-K", "-",
+      root.baseUrl + "/api/torrents/cross-instance?limit=1" + root.statusFilterParam("active")]
+    activeProc.stdinEnabled = true
+    activeProc.running = true
+  }
+
+  function handleActiveCount(raw) {
+    try {
+      var data = JSON.parse(String(raw || ""))
+      activeCount = Number(data.total) || 0
+    } catch (e) {
+      activeCount = 0
     }
   }
 
@@ -210,10 +218,14 @@ Panel {
   }
 
   function fetchTorrents() {
-    if (!apiKey || torrentsProc.running) return
+    if (!apiKey) return
+    fetchActiveCount()
+    if (torrentsProc.running) return
     torrentsLoading = true
     var url = root.baseUrl + "/api/torrents/cross-instance?limit=500&sort=added_on&order=desc"
     if (searchQuery) url += "&search=" + encodeURIComponent(searchQuery)
+    if (selectedInstanceId !== -1) url += "&instanceIds=" + selectedInstanceId
+    url += root.statusFilterParam(statusFilter)
     torrentsProc.command = ["curl", "-fsS", "--max-time", "8", "-K", "-", url]
     torrentsProc.stdinEnabled = true
     torrentsProc.running = true
@@ -223,9 +235,9 @@ Panel {
     torrentsLoading = false
     try {
       var data = JSON.parse(String(raw || ""))
-      rawTorrents = data.cross_instance_torrents || []
+      torrents = data.cross_instance_torrents || []
     } catch (e) {
-      rawTorrents = []
+      torrents = []
     }
   }
 
@@ -465,6 +477,19 @@ Panel {
   }
 
   Process {
+    id: activeProc
+    stdinEnabled: true
+    onStarted: {
+      activeProc.write(root.apiKeyHeaderConfig())
+      activeProc.stdinEnabled = false
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.handleActiveCount(text)
+    }
+  }
+
+  Process {
     id: torrentsProc
     stdinEnabled: true
     onStarted: {
@@ -607,8 +632,8 @@ Panel {
       ? root.errorText
       : ("↓ " + root.formatSpeed(root.stats.totalDownloadSpeed)
         + "   ↑ " + root.formatSpeed(root.stats.totalUploadSpeed)
-        + "\n" + (root.stats.downloading || 0) + " downloading · "
-        + (root.stats.seeding || 0) + " seeding")
+        + "\n" + (root.statusCounts.downloading || 0) + " downloading · "
+        + (root.statusCounts.uploading || 0) + " seeding")
     onPressed: function(b) { root.triggerPress(b) }
   }
 
@@ -963,22 +988,22 @@ Panel {
 
           StatChip { filterKey: "active"; label: "active"; count: root.activeCount }
           Text { text: "·"; color: root.dim; font.pixelSize: Style.font.caption }
-          StatChip { filterKey: "downloading"; label: "downloading"; count: root.stats.downloading || 0 }
+          StatChip { filterKey: "downloading"; label: "downloading"; count: root.statusCounts.downloading || 0 }
           Text { text: "·"; color: root.dim; font.pixelSize: Style.font.caption }
-          StatChip { filterKey: "seeding"; label: "seeding"; count: root.stats.seeding || 0 }
+          StatChip { filterKey: "uploading"; label: "seeding"; count: root.statusCounts.uploading || 0 }
           Text { text: "·"; color: root.dim; font.pixelSize: Style.font.caption }
-          StatChip { filterKey: "paused"; label: "paused"; count: root.stats.paused || 0 }
+          StatChip { filterKey: "stopped"; label: "paused"; count: root.statusCounts.stopped || 0 }
           Text {
-            visible: (root.stats.error || 0) > 0 || root.statusFilter === "error"
+            visible: (root.statusCounts.errored || 0) > 0 || root.statusFilter === "errored"
             text: "·"
             color: root.dim
             font.pixelSize: Style.font.caption
           }
           StatChip {
-            visible: (root.stats.error || 0) > 0 || root.statusFilter === "error"
-            filterKey: "error"
+            visible: (root.statusCounts.errored || 0) > 0 || root.statusFilter === "errored"
+            filterKey: "errored"
             label: "errored"
-            count: root.stats.error || 0
+            count: root.statusCounts.errored || 0
           }
           Item { Layout.fillWidth: true }
         }
@@ -1034,7 +1059,7 @@ Panel {
           Layout.fillWidth: true
           Layout.topMargin: 8
           horizontalAlignment: Text.AlignHCenter
-          text: root.rawTorrents.length === 0 ? "No torrents found" : "No torrents match the filter"
+          text: root.filtered ? "No torrents match the filter" : "No torrents found"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
